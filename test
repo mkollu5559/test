@@ -1,6 +1,13 @@
+import sys
+import os
 import pytest
 from unittest.mock import patch
-from aws.lambda.s3notification import lambda as lambda_module
+
+# Add lambda path to sys.path
+sys.path.append(os.path.abspath("module/aws/lambda/s3notification"))
+
+# Import the lambda module after path is set
+import lambda as lambda_module
 
 @pytest.fixture
 def s3_event():
@@ -14,10 +21,10 @@ def s3_event():
         }]
     }
 
-@patch.dict("aws.lambda.s3notification.lambda.os.environ", {
+@patch.dict("lambda_module.os.environ", {
     "TOPIC_ARN": "arn:aws:sns:us-east-1:123456789012:MyTopic"
 })
-@patch("aws.lambda.s3notification.lambda.handle_publish_sns")
+@patch("lambda_module.handle_publish_sns")
 def test_lambda_handler(mock_publish, s3_event):
     mock_publish.return_value = {"MessageId": "mock-message-id"}
 
