@@ -2,37 +2,37 @@ import sys
 import os
 import pytest
 import boto3
-from moto import mock_s3, mock_dynamodb
+from moto import mock_aws
 from datetime import datetime
 
-# Add the module path
+# Add module path
+sys.path.append(os.path.abspath("module/aws/lambda_functions/maa_ma_datasync_data_registration"))
 
 from lambda_function import get_s3_notification, audit_table_insert
 
 
 @pytest.fixture
+@mock_aws
 def s3_setup():
-    with mock_s3():
-        s3 = boto3.client('s3', region_name='us-east-1')
-        bucket_name = 'test-bucket'
-        s3.create_bucket(Bucket=bucket_name)
+    s3 = boto3.client('s3', region_name='us-east-1')
+    bucket_name = 'test-bucket'
+    s3.create_bucket(Bucket=bucket_name)
 
-        # Add a queue notification config
-        s3.put_bucket_notification_configuration(
-            Bucket=bucket_name,
-            NotificationConfiguration={
-                'QueueConfigurations': [
-                    {
-                        'QueueArn': 'arn:aws:sqs:us-east-1:123456789012:test-queue',
-                        'Events': ['s3:ObjectCreated:*']
-                    }
-                ]
-            }
-        )
-
-        yield bucket_name
+    s3.put_bucket_notification_configuration(
+        Bucket=bucket_name,
+        NotificationConfiguration={
+            'QueueConfigurations': [
+                {
+                    'QueueArn': 'arn:aws:sqs:us-east-1:123456789012:test-queue',
+                    'Events': ['s3:ObjectCreated:*']
+                }
+            ]
+        }
+    )
+    yield bucket_name
 
 
+@mock_aws
 def test_get_s3_notification(s3_setup):
     bucket = s3_setup
     result = get_s3_notification(bucket)
@@ -40,9 +40,8 @@ def test_get_s3_notification(s3_setup):
     assert result['QueueConfigurations'][0]['QueueArn'] == 'arn:aws:sqs:us-east-1:123456789012:test-queue'
 
 
-@mock_dynamodb
+@mock_aws
 def test_audit_table_insert(monkeypatch):
-    # Mock the DynamoDB table
     dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
     table_name = 'maa-ma-datasync-file-copy-audit-hist'
 
@@ -53,23 +52,21 @@ def test_audit_table_insert(monkeypatch):
         BillingMode='PAY_PER_REQUEST'
     )
 
-    # Monkeypatch the audit_table inside lambda_function
     import lambda_function
     lambda_function.audit_table = table
 
     lambda_function.audit_table_insert(
         JobRunId='test-123',
-        LOB='marketing',
-        source_db='salesdb',
-        source_table='orders',
-        glue_job_name='glue-job-runner'
+        LOB='finance',
+        source_db='maindb',
+        source_table='transactions',
+        glue_job_name='glue-job-test'
     )
 
-    # Check if item was inserted
     response = table.get_item(Key={'Run_ID': 'test-123'})
     item = response['Item']
 
-    assert item['Glue_Job_Name'] == 'glue-job-runner'
-    assert item['LOB'] == 'marketing'
-    assert item['TDV_Table_Name'] == 'salesdb.orders'
+    assert item['Glue_Job_Name'] == 'glue-job-test'
+    assert item['LOB'] == 'finance'
+    assert item['TDV_Table_Name'] == 'maindb.transactions'
     assert item['Run_Status'] == 'Started'
