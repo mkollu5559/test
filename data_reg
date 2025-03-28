@@ -1,0 +1,70 @@
+import boto3
+import pytest
+from moto import mock_s3, mock_dynamodb
+from your_lambda_module import get_s3_notification, audit_table_insert  # update the import
+
+from datetime import datetime
+
+@pytest.fixture
+def s3_setup():
+    with mock_s3():
+        s3 = boto3.client('s3', region_name='us-east-1')
+        bucket_name = 'test-bucket'
+        s3.create_bucket(Bucket=bucket_name)
+
+        # Add notification config
+        s3.put_bucket_notification_configuration(
+            Bucket=bucket_name,
+            NotificationConfiguration={
+                'QueueConfigurations': [
+                    {
+                        'QueueArn': 'arn:aws:sqs:us-east-1:123456789012:test-queue',
+                        'Events': ['s3:ObjectCreated:*']
+                    }
+                ]
+            }
+        )
+        yield bucket_name
+
+
+def test_get_s3_notification(s3_setup):
+    bucket = s3_setup
+    result = get_s3_notification(bucket)
+    assert 'QueueConfigurations' in result
+    assert result['QueueConfigurations'][0]['QueueArn'] == 'arn:aws:sqs:us-east-1:123456789012:test-queue'
+
+
+@mock_dynamodb
+def test_audit_table_insert(monkeypatch):
+    # Setup mocked DynamoDB table
+    dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+    table_name = 'maa-ma-datasync-file-copy-audit-hist'
+
+    table = dynamodb.create_table(
+        TableName=table_name,
+        KeySchema=[{'AttributeName': 'Run_ID', 'KeyType': 'HASH'}],
+        AttributeDefinitions=[{'AttributeName': 'Run_ID', 'AttributeType': 'S'}],
+        BillingMode='PAY_PER_REQUEST'
+    )
+
+    # monkeypatch the audit_table inside the lambda module
+    import your_lambda_module
+    your_lambda_module.audit_table = table
+
+    # Call function
+    your_lambda_module.audit_table_insert(
+        JobRunId='test123',
+        LOB='testLOB',
+        source_db='db1',
+        source_table='table1',
+        glue_job_name='glue-job-xyz'
+    )
+
+    # Validate insert
+    response = table.get_item(Key={'Run_ID': 'test123'})
+    item = response['Item']
+
+    assert item['Glue_Job_Name'] == 'glue-job-xyz'
+    assert item['LOB'] == 'testLOB'
+    assert item['TDV_Table_Name'] == 'db1.table1'
+    assert item['Run_Status'] == 'Started'
