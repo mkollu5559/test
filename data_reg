@@ -3,40 +3,79 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-# Add your lambda module path
+# Add module path
 
 
-from lambda_function import trigger_table_schema_glue_job
+from lambda_function import get_dynamodb_reg_data
 
 
-@patch("lambda_function.glueClient")
-@patch("lambda_function.audit_table_insert")
-def test_trigger_table_schema_glue_job(mock_audit_insert, mock_glue_client):
-    # Arrange
-    mock_glue_client.start_job_run.return_value = {
-        'JobRunId': 'jr-123456789'
+@patch("lambda_function.ddb_table")
+def test_get_dynamodb_reg_data_s3_reg_match(mock_ddb_table):
+    # Simulate scan return from DynamoDB
+    mock_ddb_table.scan.return_value = {
+        'Items': [
+            {
+                'Source_Full_FilePath': 's3://bucket/path/to/file1',
+                'Target_Full_FilePath': 's3://bucket/target/path/file1'
+            }
+        ]
     }
 
-    # Act
-    trigger_table_schema_glue_job(
-        source_db="test_db",
-        source_table="test_table",
-        lob="finance",
-        data_domain="core"
+    # Input values
+    input_db_pk = 's3://bucket/path/to/file1'
+    input_db_sk = 's3://bucket/target/path/file1'
+    ddb_table = mock_ddb_table
+    table_type = 's3_reg'
+
+    # Call function
+    is_pair_available, matched_value = get_dynamodb_reg_data(
+        input_db_pk, input_db_sk, ddb_table, table_type
     )
 
-    # Assert glueClient.start_job_run called with expected args
-    mock_glue_client.start_job_run.assert_called_once()
-    args, kwargs = mock_glue_client.start_job_run.call_args
+    assert is_pair_available == 'Y'
+    assert matched_value == input_db_pk
 
-    assert kwargs["JobName"]  # should exist
-    assert kwargs["Arguments"]["--DATABASE_NAME"] == "test_db"
-    assert kwargs["Arguments"]["--TABLE_NAME"] == "test_table"
 
-    # Assert audit_table_insert was called with the JobRunId and other info
-    mock_audit_insert.assert_called_once()
-    audit_args = mock_audit_insert.call_args[0]
-    assert audit_args[0] == "jr-123456789"  # JobRunId
-    assert audit_args[1] == "finance"       # LOB
-    assert audit_args[2] == "test_db"
-    assert audit_args[3] == "test_table"
+@patch("lambda_function.ddb_table")
+def test_get_dynamodb_reg_data_tdv_reg_match(mock_ddb_table):
+    # Simulate scan return from DynamoDB
+    mock_ddb_table.scan.return_value = {
+        'Items': [
+            {
+                'Source_TableName': 'CUSTOMERS',
+                'TDV_Table_Name': 'tdv.CUSTOMERS'
+            }
+        ]
+    }
+
+    # Input values
+    input_db_pk = 'customers'
+    input_db_sk = 'tdv.customers'
+    ddb_table = mock_ddb_table
+    table_type = 'tdv_reg'
+
+    # Call function
+    is_pair_available, matched_value = get_dynamodb_reg_data(
+        input_db_pk, input_db_sk, ddb_table, table_type
+    )
+
+    assert is_pair_available == 'Y'
+    assert matched_value == input_db_pk
+
+
+@patch("lambda_function.ddb_table")
+def test_get_dynamodb_reg_data_no_match(mock_ddb_table):
+    # Simulate empty result
+    mock_ddb_table.scan.return_value = {'Items': []}
+
+    input_db_pk = 'missing'
+    input_db_sk = 'none'
+    ddb_table = mock_ddb_table
+    table_type = 's3_reg'
+
+    is_pair_available, matched_value = get_dynamodb_reg_data(
+        input_db_pk, input_db_sk, ddb_table, table_type
+    )
+
+    assert is_pair_available == 'N'
+    assert matched_value == input_db_pk
