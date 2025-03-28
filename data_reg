@@ -1,17 +1,17 @@
 import sys
 import os
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 # Add module path
-
+sys.path.append(os.path.abspath("module/aws/lambda_functions/maa_ma_datasync_data_registration"))
 
 from lambda_function import get_dynamodb_reg_data
 
 
-@patch("lambda_function.ddb_table")
-def test_get_dynamodb_reg_data_s3_reg_match(mock_ddb_table):
-    # Simulate scan return from DynamoDB
+def test_get_dynamodb_reg_data_s3_reg_match():
+    # Create mock DynamoDB table
+    mock_ddb_table = MagicMock()
     mock_ddb_table.scan.return_value = {
         'Items': [
             {
@@ -21,24 +21,20 @@ def test_get_dynamodb_reg_data_s3_reg_match(mock_ddb_table):
         ]
     }
 
-    # Input values
     input_db_pk = 's3://bucket/path/to/file1'
     input_db_sk = 's3://bucket/target/path/file1'
-    ddb_table = mock_ddb_table
     table_type = 's3_reg'
 
-    # Call function
     is_pair_available, matched_value = get_dynamodb_reg_data(
-        input_db_pk, input_db_sk, ddb_table, table_type
+        input_db_pk, input_db_sk, mock_ddb_table, table_type
     )
 
     assert is_pair_available == 'Y'
     assert matched_value == input_db_pk
 
 
-@patch("lambda_function.ddb_table")
-def test_get_dynamodb_reg_data_tdv_reg_match(mock_ddb_table):
-    # Simulate scan return from DynamoDB
+def test_get_dynamodb_reg_data_tdv_reg_match():
+    mock_ddb_table = MagicMock()
     mock_ddb_table.scan.return_value = {
         'Items': [
             {
@@ -48,33 +44,28 @@ def test_get_dynamodb_reg_data_tdv_reg_match(mock_ddb_table):
         ]
     }
 
-    # Input values
     input_db_pk = 'customers'
     input_db_sk = 'tdv.customers'
-    ddb_table = mock_ddb_table
     table_type = 'tdv_reg'
 
-    # Call function
     is_pair_available, matched_value = get_dynamodb_reg_data(
-        input_db_pk, input_db_sk, ddb_table, table_type
+        input_db_pk, input_db_sk, mock_ddb_table, table_type
     )
 
     assert is_pair_available == 'Y'
     assert matched_value == input_db_pk
 
 
-@patch("lambda_function.ddb_table")
-def test_get_dynamodb_reg_data_no_match(mock_ddb_table):
-    # Simulate empty result
+def test_get_dynamodb_reg_data_no_match():
+    mock_ddb_table = MagicMock()
     mock_ddb_table.scan.return_value = {'Items': []}
 
     input_db_pk = 'missing'
     input_db_sk = 'none'
-    ddb_table = mock_ddb_table
     table_type = 's3_reg'
 
     is_pair_available, matched_value = get_dynamodb_reg_data(
-        input_db_pk, input_db_sk, ddb_table, table_type
+        input_db_pk, input_db_sk, mock_ddb_table, table_type
     )
 
     assert is_pair_available == 'N'
