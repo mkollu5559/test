@@ -6,48 +6,37 @@ from unittest.mock import patch, MagicMock
 # Add your lambda module path
 
 
-from lambda_function import get_s3_notification, audit_table_insert
+from lambda_function import trigger_table_schema_glue_job
 
 
-@patch("lambda_function.s3Client")
-def test_get_s3_notification(mock_s3_client):
-    # Mock the s3 get_bucket_notification_configuration response
-    mock_s3 = MagicMock()
-    mock_s3.get_bucket_notification_configuration.return_value = {
-        'QueueConfigurations': [
-            {
-                'QueueArn': 'arn:aws:sqs:us-east-1:123456789012:test-queue',
-                'Events': ['s3:ObjectCreated:*']
-            }
-        ]
+@patch("lambda_function.glueClient")
+@patch("lambda_function.audit_table_insert")
+def test_trigger_table_schema_glue_job(mock_audit_insert, mock_glue_client):
+    # Arrange
+    mock_glue_client.start_job_run.return_value = {
+        'JobRunId': 'jr-123456789'
     }
-    mock_s3_client.return_value = mock_s3
 
-    result = get_s3_notification("dummy-bucket")
-    assert 'QueueConfigurations' in result
-    assert result['QueueConfigurations'][0]['QueueArn'] == 'arn:aws:sqs:us-east-1:123456789012:test-queue'
-
-
-@patch("lambda_function.audit_table")
-def test_audit_table_insert(mock_audit_table):
-    # Mock the put_item method
-    mock_audit_table.put_item.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
-
-    from lambda_function import audit_table_insert
-
-    audit_table_insert(
-        JobRunId="test-123",
-        LOB="finance",
-        source_db="maindb",
-        source_table="transactions",
-        glue_job_name="glue-job-test"
+    # Act
+    trigger_table_schema_glue_job(
+        source_db="test_db",
+        source_table="test_table",
+        lob="finance",
+        data_domain="core"
     )
 
-    # Assert that put_item was called once with expected values
-    args, kwargs = mock_audit_table.put_item.call_args
-    item = kwargs['Item']
-    assert item['Run_ID'] == "test-123"
-    assert item['Glue_Job_Name'] == "glue-job-test"
-    assert item['LOB'] == "finance"
-    assert item['TDV_Table_Name'] == "maindb.transactions"
-    assert item['Run_Status'] == "Started"
+    # Assert glueClient.start_job_run called with expected args
+    mock_glue_client.start_job_run.assert_called_once()
+    args, kwargs = mock_glue_client.start_job_run.call_args
+
+    assert kwargs["JobName"]  # should exist
+    assert kwargs["Arguments"]["--DATABASE_NAME"] == "test_db"
+    assert kwargs["Arguments"]["--TABLE_NAME"] == "test_table"
+
+    # Assert audit_table_insert was called with the JobRunId and other info
+    mock_audit_insert.assert_called_once()
+    audit_args = mock_audit_insert.call_args[0]
+    assert audit_args[0] == "jr-123456789"  # JobRunId
+    assert audit_args[1] == "finance"       # LOB
+    assert audit_args[2] == "test_db"
+    assert audit_args[3] == "test_table"
