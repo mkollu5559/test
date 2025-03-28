@@ -1,9 +1,14 @@
-import boto3
+import sys
+import os
 import pytest
+import boto3
 from moto import mock_s3, mock_dynamodb
-from your_lambda_module import get_s3_notification, audit_table_insert  # update the import
-
 from datetime import datetime
+
+# Add the module path
+
+from lambda_function import get_s3_notification, audit_table_insert
+
 
 @pytest.fixture
 def s3_setup():
@@ -12,7 +17,7 @@ def s3_setup():
         bucket_name = 'test-bucket'
         s3.create_bucket(Bucket=bucket_name)
 
-        # Add notification config
+        # Add a queue notification config
         s3.put_bucket_notification_configuration(
             Bucket=bucket_name,
             NotificationConfiguration={
@@ -24,6 +29,7 @@ def s3_setup():
                 ]
             }
         )
+
         yield bucket_name
 
 
@@ -36,7 +42,7 @@ def test_get_s3_notification(s3_setup):
 
 @mock_dynamodb
 def test_audit_table_insert(monkeypatch):
-    # Setup mocked DynamoDB table
+    # Mock the DynamoDB table
     dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
     table_name = 'maa-ma-datasync-file-copy-audit-hist'
 
@@ -47,24 +53,23 @@ def test_audit_table_insert(monkeypatch):
         BillingMode='PAY_PER_REQUEST'
     )
 
-    # monkeypatch the audit_table inside the lambda module
-    import your_lambda_module
-    your_lambda_module.audit_table = table
+    # Monkeypatch the audit_table inside lambda_function
+    import lambda_function
+    lambda_function.audit_table = table
 
-    # Call function
-    your_lambda_module.audit_table_insert(
-        JobRunId='test123',
-        LOB='testLOB',
-        source_db='db1',
-        source_table='table1',
-        glue_job_name='glue-job-xyz'
+    lambda_function.audit_table_insert(
+        JobRunId='test-123',
+        LOB='marketing',
+        source_db='salesdb',
+        source_table='orders',
+        glue_job_name='glue-job-runner'
     )
 
-    # Validate insert
-    response = table.get_item(Key={'Run_ID': 'test123'})
+    # Check if item was inserted
+    response = table.get_item(Key={'Run_ID': 'test-123'})
     item = response['Item']
 
-    assert item['Glue_Job_Name'] == 'glue-job-xyz'
-    assert item['LOB'] == 'testLOB'
-    assert item['TDV_Table_Name'] == 'db1.table1'
+    assert item['Glue_Job_Name'] == 'glue-job-runner'
+    assert item['LOB'] == 'marketing'
+    assert item['TDV_Table_Name'] == 'salesdb.orders'
     assert item['Run_Status'] == 'Started'
